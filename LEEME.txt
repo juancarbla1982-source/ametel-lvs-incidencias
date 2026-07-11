@@ -1,0 +1,22 @@
+CONTROL AMETEL · LVS INCIDENCIAS · ENTREGA 1
+
+Esta primera entrega es una copia independiente de LVS MONTAJE y está adaptada al Excel:
+INCIDENCIAS PEND UNIFICADAS REAL 8-7-2026(1).xlsx
+
+Campos reconocidos:
+- CD
+- TRAFO
+- CODIGO DE INCIDENCIA
+- INCIDENCIA
+- COMENTARIOS
+- LCL
+- LOCALIDAD
+
+Datos separados en Firestore:
+- incidents
+- incidentImports
+
+Los usuarios se comparten con la app de montaje mediante la colección users y Firebase Authentication.
+
+SIGUIENTE PASO:
+Crear un repositorio nuevo en GitHub y añadir las reglas de Firestore para incidents e incidentImports.

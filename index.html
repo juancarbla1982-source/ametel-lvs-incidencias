@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f3d5e" />
+  <meta name="description" content="Control Ametel - Incidencias LVS" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icon-192.png" />
+  <title>Control Ametel · LVS Incidencias</title>
+  <style>
+    :root { font-family: Arial, Helvetica, sans-serif; color:#17324a; background:#f4f7fa; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; }
+    .hidden { display:none !important; }
+    .screen { min-height:100vh; }
+    .hero { background:#0f3d5e; color:white; padding:28px 18px 36px; text-align:center; }
+    .hero h1 { margin:0 0 6px; font-size:28px; }
+    .hero p { margin:0; opacity:.9; }
+    .card { max-width:760px; margin:-18px auto 24px; background:white; padding:22px; border-radius:18px;
+      box-shadow:0 8px 28px rgba(15,61,94,.15); }
+    label { display:block; font-weight:700; margin:14px 0 7px; }
+    input, textarea, select { width:100%; padding:14px; border:1px solid #c7d2dc; border-radius:12px; font-size:16px; }
+    textarea { min-height:110px; resize:vertical; }
+    button { width:100%; border:0; border-radius:12px; padding:14px 16px; font-size:16px; font-weight:700; cursor:pointer; }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    .primary { background:#0f3d5e; color:white; }
+    .success { background:#2f8f3a; color:white; }
+    .secondary { background:#5d6b78; color:white; }
+    .danger { background:#b33a3a; color:white; }
+    .warning { background:#c57a11; color:white; }
+    .toolbar { display:flex; gap:10px; flex-wrap:wrap; margin:14px 0; }
+    .toolbar button { width:auto; flex:1; min-width:150px; }
+    .topbar { background:#0f3d5e; color:#fff; padding:14px 18px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .topbar strong { font-size:19px; }
+    .topbar button { width:auto; padding:9px 13px; background:#fff; color:#0f3d5e; }
+    .content { max-width:980px; margin:0 auto; padding:18px; }
+    .status { margin-top:14px; padding:12px; border-radius:10px; background:#eef4f8; }
+    .error { background:#fdecec; color:#8c2424; }
+    .ok { background:#eaf7ec; color:#21652a; }
+    .info { background:#eaf2fb; color:#164d78; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin:18px 0; }
+    .stat { background:white; padding:18px; border-radius:14px; box-shadow:0 4px 16px rgba(0,0,0,.06); }
+    .stat b { display:block; font-size:28px; margin-top:6px; }
+    .list { display:grid; gap:12px; }
+    .item { background:white; padding:16px; border-radius:14px; box-shadow:0 4px 16px rgba(0,0,0,.06); }
+    .item h3 { margin:0 0 8px; }
+    .badge { display:inline-block; padding:5px 9px; border-radius:999px; font-size:13px; font-weight:700; }
+    .pending { background:#fff1d6; color:#8b5a00; }
+    .done { background:#e4f5e7; color:#21652a; }
+    .archived { background:#eceff2; color:#53606b; }
+    small { color:#667787; }
+    .empty { text-align:center; padding:24px; background:white; border-radius:14px; color:#667787; }
+    .section-card { background:white; padding:18px; border-radius:14px; box-shadow:0 4px 16px rgba(0,0,0,.06); margin-bottom:18px; }
+    .section-card h2, .section-card h3 { margin-top:0; }
+    .preview-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:10px; margin:15px 0; }
+    .preview-box { padding:14px; border-radius:12px; background:#f3f6f8; text-align:center; }
+    .preview-box b { display:block; font-size:24px; margin-top:4px; }
+    .details { margin-top:12px; border-top:1px solid #e7edf1; }
+    .detail-row { display:grid; grid-template-columns:minmax(150px,240px) 1fr; gap:10px; padding:8px 0; border-bottom:1px solid #eef2f5; }
+    .detail-row strong { color:#526574; }
+    .file-label { display:block; padding:16px; border:2px dashed #a9bac7; border-radius:12px; text-align:center; cursor:pointer; background:#f8fafb; }
+    .file-label input { display:none; }
+    .preview-section { margin-top:14px; padding:14px; border-radius:12px; background:#f8fafb; }
+    .preview-section h4 { margin:0 0 10px; }
+    .preview-list { max-height:220px; overflow:auto; display:grid; gap:7px; }
+    .preview-item { padding:9px 10px; border-radius:9px; background:white; border:1px solid #e4ebf0; }
+    .preview-item small { display:block; margin-top:3px; }
+    .history-list { display:grid; gap:10px; }
+    .history-item { padding:12px; background:#f8fafb; border-radius:10px; border:1px solid #e5ebf0; }
+    @media(max-width:620px) {
+      .detail-row { grid-template-columns:1fr; gap:2px; }
+      .toolbar button { min-width:100%; }
+    }
+  </style>
+</head>
+<body>
+  <section id="loginScreen" class="screen">
+    <div class="hero">
+      <h1>Control Ametel</h1>
+      <p>LVS INCIDENCIAS</p>
+    </div>
+    <div class="card">
+      <h2>Iniciar sesión</h2>
+      <form id="loginForm">
+        <label for="email">Correo electrónico</label>
+        <input id="email" type="email" autocomplete="username" required />
+        <label for="password">Contraseña</label>
+        <input id="password" type="password" autocomplete="current-password" required />
+        <button class="primary" type="submit" style="margin-top:18px">Entrar</button>
+      </form>
+      <div id="loginMessage" class="status hidden"></div>
+    </div>
+  </section>
+
+  <section id="appScreen" class="screen hidden">
+    <div class="topbar">
+      <div><strong>Control Ametel · LVS INCIDENCIAS</strong><br><small id="userLabel" style="color:#dbe7ef"></small></div>
+      <button id="logoutBtn">Salir</button>
+    </div>
+
+    <main class="content">
+      <div id="adminPanel" class="hidden">
+        <h2>Panel de administrador</h2>
+        <div class="grid">
+          <div class="stat">Pendientes<b id="pendingCount">0</b></div>
+          <div class="stat">Realizadas<b id="doneCount">0</b></div>
+          <div class="stat">Archivadas<b id="archivedCount">0</b></div>
+          <div class="stat">Usuarios<b id="userCount">0</b></div>
+        </div>
+
+        <section class="section-card">
+          <h3>Actualizar incidencias desde Excel</h3>
+          <p>Selecciona el Excel de incidencias pendientes de revisar. Antes de modificar nada se mostrará una previsualización.</p>
+          <label class="file-label">
+            <input id="excelFile" type="file" accept=".xlsx,.xls" />
+            <span id="fileText">📥 Seleccionar Excel de incidencias</span>
+          </label>
+          <div id="importPreview" class="hidden">
+            <div class="preview-grid">
+              <div class="preview-box">Nuevas<b id="newCount">0</b></div>
+              <div class="preview-box">Modificadas<b id="changedCount">0</b></div>
+              <div class="preview-box">Sin cambios<b id="sameCount">0</b></div>
+              <div class="preview-box">A archivar<b id="toArchiveCount">0</b></div>
+              <div class="preview-box">Filas válidas<b id="validCount">0</b></div>
+            </div>
+            <div class="preview-section">
+              <h4>Detalle de cambios</h4>
+              <div id="previewDetails"></div>
+            </div>
+            <div class="toolbar">
+              <button id="confirmImportBtn" class="success">Confirmar importación</button>
+              <button id="cancelImportBtn" class="secondary">Cancelar</button>
+            </div>
+          </div>
+          <div id="importMessage" class="status hidden"></div>
+        </section>
+
+        <section class="section-card">
+          <h3>Historial de importaciones</h3>
+          <div id="importHistory" class="history-list">
+            <div class="empty">Aún no hay importaciones registradas.</div>
+          </div>
+        </section>
+
+        <div class="toolbar">
+          <button id="refreshBtn" class="primary">Actualizar listado</button>
+        </div>
+      </div>
+
+      <div id="workerPanel" class="hidden">
+        <h2>Incidencias LVS pendientes de revisar</h2>
+      </div>
+
+      <div class="card" style="margin:18px 0 22px; max-width:none;">
+        <label for="searchCd">Buscar CD</label>
+        <input id="searchCd" placeholder="Ejemplo: 17125" inputmode="numeric" />
+        <label for="locationFilter">Localidad</label>
+        <select id="locationFilter"><option value="">Todas</option></select>
+        <label for="statusFilter" id="statusLabel">Estado</label>
+        <select id="statusFilter">
+          <option value="pending">Pendientes</option>
+          <option value="done">Realizadas</option>
+          <option value="all">Todas</option>
+        </select>
+        <div class="toolbar">
+          <button id="searchBtn" class="primary">Buscar</button>
+          <button id="clearBtn" class="secondary">Limpiar</button>
+        </div>
+      </div>
+
+      <div id="incidentsList" class="list"></div>
+      <div id="appMessage" class="status hidden"></div>
+    </main>
+  </section>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+    import {
+      getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut,
+      setPersistence, browserLocalPersistence
+    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+    import {
+      getFirestore, doc, getDoc, collection, getDocs, query, orderBy,
+      updateDoc, addDoc, serverTimestamp, writeBatch
+    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBpus4hK22UHkfpi0GAJ6Pou1SsUER61CE",
+      authDomain: "ametel-lvs-control.firebaseapp.com",
+      projectId: "ametel-lvs-control",
+      storageBucket: "ametel-lvs-control.firebasestorage.app",
+      messagingSenderId: "943022770704",
+      appId: "1:943022770704:web:a7e4a7f59ffda022755895"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    await setPersistence(auth, browserLocalPersistence);
+
+    const $ = id => document.getElementById(id);
+    const state = { profile:null, incidents:[], users:[], importPlan:null };
+
+    function showMessage(el, text, type="ok") {
+      el.textContent = text;
+      el.className = `status ${type}`;
+      el.classList.remove("hidden");
+    }
+    function hideMessage(el) { el.classList.add("hidden"); }
+    function normalizeText(v) { return String(v ?? "").trim(); }
+    function normalizeCd(v) { return normalizeText(v).replace(/^CD/i, "").replace(/\.0$/, ""); }
+    function normalizeTrafo(v) { return normalizeText(v).toUpperCase() || "SIN_TRAFO"; }
+    function safeKey(cd, trafo) {
+      return `CD${normalizeCd(cd)}_${normalizeTrafo(trafo).replace(/[^A-Z0-9_-]/g, "_")}`;
+    }
+    function cleanObject(obj) {
+      const out = {};
+      Object.entries(obj).forEach(([k,v]) => {
+        if (v instanceof Date) out[k] = v.toISOString();
+        else if (v !== undefined && v !== null && v !== "") out[k] = typeof v === "string" ? v.trim() : v;
+      });
+      return out;
+    }
+    function comparableTechnical(obj) {
+      return JSON.stringify(obj || {}, Object.keys(obj || {}).sort());
+    }
+
+    $("loginForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      hideMessage($("loginMessage"));
+      try {
+        await signInWithEmailAndPassword(auth, $("email").value.trim(), $("password").value);
+      } catch (err) {
+        console.error(err);
+        showMessage($("loginMessage"), "No se pudo iniciar sesión. Revisa el correo y la contraseña.", "error");
+      }
+    });
+
+    $("logoutBtn").addEventListener("click", () => signOut(auth));
+    $("refreshBtn").addEventListener("click", loadAll);
+    $("searchBtn").addEventListener("click", renderIncidents);
+    $("clearBtn").addEventListener("click", () => {
+      $("searchCd").value = "";
+      $("locationFilter").value = "";
+      $("statusFilter").value = "pending";
+      renderIncidents();
+    });
+    $("locationFilter").addEventListener("change", renderIncidents);
+    $("statusFilter").addEventListener("change", renderIncidents);
+
+    $("excelFile").addEventListener("change", handleExcelSelection);
+    $("cancelImportBtn").addEventListener("click", resetImport);
+    $("confirmImportBtn").addEventListener("click", executeImport);
+
+    onAuthStateChanged(auth, async user => {
+      if (!user) {
+        $("loginScreen").classList.remove("hidden");
+        $("appScreen").classList.add("hidden");
+        return;
+      }
+      try {
+        const profileSnap = await getDoc(doc(db, "users", user.uid));
+        if (!profileSnap.exists()) throw new Error("Perfil no encontrado");
+        state.profile = profileSnap.data();
+        if (state.profile.active === false) throw new Error("Usuario desactivado");
+        $("userLabel").textContent = `${state.profile.name || user.email} · ${state.profile.role || "worker"}`;
+        $("loginScreen").classList.add("hidden");
+        $("appScreen").classList.remove("hidden");
+        $("adminPanel").classList.toggle("hidden", state.profile.role !== "admin");
+        $("workerPanel").classList.toggle("hidden", state.profile.role === "admin");
+        $("statusFilter").value = "pending";
+        await loadAll();
+      } catch (err) {
+        console.error(err);
+        await signOut(auth);
+        showMessage($("loginMessage"), "Tu usuario existe, pero falta su perfil en Firestore o está desactivado.", "error");
+      }
+    });
+
+    async function loadAll() {
+      hideMessage($("appMessage"));
+      const incidentSnap = await getDocs(query(collection(db, "incidents"), orderBy("cd")));
+      state.incidents = incidentSnap.docs.map(d => ({ id:d.id, ...d.data() }));
+      if (state.profile?.role === "admin") {
+        const usersSnap = await getDocs(collection(db, "users"));
+        state.users = usersSnap.docs.map(d => ({ id:d.id, ...d.data() }));
+        await loadImportHistory();
+      }
+      updateLocations();
+      renderIncidents();
+      updateStats();
+    }
+
+    function updateLocations() {
+      const current = $("locationFilter").value;
+      const locations = [...new Set(state.incidents
+        .filter(x => !x.archived)
+        .map(x => x.location)
+        .filter(Boolean))].sort((a,b) => a.localeCompare(b, "es"));
+      $("locationFilter").innerHTML = '<option value="">Todas</option>' +
+        locations.map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
+      $("locationFilter").value = current;
+    }
+
+    function updateStats() {
+      $("pendingCount").textContent = state.incidents.filter(x => !x.archived && x.status !== "done").length;
+      $("doneCount").textContent = state.incidents.filter(x => !x.archived && x.status === "done").length;
+      $("archivedCount").textContent = state.incidents.filter(x => x.archived).length;
+      $("userCount").textContent = state.users.length;
+    }
+
+    function renderIncidents() {
+      const term = $("searchCd").value.trim().toLowerCase().replace(/^cd/, "");
+      const loc = $("locationFilter").value;
+      const status = $("statusFilter").value;
+      const rows = state.incidents.filter(x => {
+        if (x.archived) return false;
+        const matchTerm = !term || String(x.cd || "").toLowerCase().includes(term);
+        const matchLoc = !loc || x.location === loc;
+        const matchStatus = status === "all" ||
+          (status === "done" && x.status === "done") ||
+          (status === "pending" && x.status !== "done");
+        return matchTerm && matchLoc && matchStatus;
+      });
+
+      const root = $("incidentsList");
+      if (!rows.length) {
+        root.innerHTML = '<div class="empty">No hay incidencias para mostrar.</div>';
+        return;
+      }
+
+      root.innerHTML = rows.map(x => {
+        const tech = x.technicalData || {};
+        const detailRows = Object.entries(tech).map(([k,v]) =>
+          `<div class="detail-row"><strong>${escapeHtml(k)}</strong><span>${escapeHtml(v)}</span></div>`
+        ).join("");
+
+        return `
+          <article class="item">
+            <h3>CD${escapeHtml(x.cd || "")} · ${escapeHtml(x.transformer || "")}</h3><p><b>Incidencia:</b> ${escapeHtml(x.incidentCode || x.technicalData?.["Código de incidencia"] || "-")}</p>
+            <span class="badge ${x.status === "done" ? "done" : "pending"}">${x.status === "done" ? "Realizada" : "Pendiente"}</span>
+            <p><b>Localidad:</b> ${escapeHtml(x.location || "-")}</p>
+            <details>
+              <summary><b>Ver todos los datos de la incidencia</b></summary>
+              <div class="details">${detailRows || '<p>Sin datos de la incidencia.</p>'}</div>
+            </details>
+            <label>Comentario (opcional)</label>
+            <textarea id="comment_${x.id}" placeholder="Escribe un comentario libre...">${escapeHtml(x.comment || "")}</textarea>
+            <div class="toolbar">
+              <button class="primary" data-save="${x.id}">Guardar comentario</button>
+              ${x.status === "done"
+                ? (state.profile?.role === "admin" ? `<button class="secondary" data-pending="${x.id}">Volver a pendiente</button>` : "")
+                : `<button class="success" data-done="${x.id}">Marcar incidencia revisada</button>`}
+            </div>
+            ${x.completedByName ? `<small>Revisada por ${escapeHtml(x.completedByName)}.</small>` : ""}
+          </article>`;
+      }).join("");
+
+      root.querySelectorAll("[data-save]").forEach(btn => btn.onclick = () => saveComment(btn.dataset.save));
+      root.querySelectorAll("[data-done]").forEach(btn => btn.onclick = () => setStatus(btn.dataset.done, "done"));
+      root.querySelectorAll("[data-pending]").forEach(btn => btn.onclick = () => setStatus(btn.dataset.pending, "pending"));
+    }
+
+    async function saveComment(id) {
+      const text = $(`comment_${id}`).value.trim();
+      await updateDoc(doc(db, "incidents", id), {
+        comment:text,
+        commentBy:auth.currentUser.uid,
+        commentByName:state.profile.name || auth.currentUser.email,
+        commentAt:serverTimestamp(),
+        updatedAt:serverTimestamp()
+      });
+      if (text) {
+        await addDoc(collection(db, "incidents", id, "comments"), {
+          text,
+          userId:auth.currentUser.uid,
+          userName:state.profile.name || auth.currentUser.email,
+          createdAt:serverTimestamp()
+        });
+      }
+      showMessage($("appMessage"), "Comentario guardado.");
+      await loadAll();
+    }
+
+    async function setStatus(id, status) {
+      const current = state.incidents.find(x => x.id === id);
+      const commentText = $(`comment_${id}`)?.value.trim() || current?.comment || "";
+      await updateDoc(doc(db, "incidents", id), {
+        status,
+        comment:commentText,
+        commentBy:commentText ? auth.currentUser.uid : (current?.commentBy || null),
+        commentByName:commentText ? (state.profile.name || auth.currentUser.email) : (current?.commentByName || null),
+        commentAt:commentText ? serverTimestamp() : (current?.commentAt || null),
+        completedBy: status === "done" ? auth.currentUser.uid : null,
+        completedByName: status === "done" ? (state.profile.name || auth.currentUser.email) : null,
+        completedAt: status === "done" ? serverTimestamp() : null,
+        updatedAt:serverTimestamp()
+      });
+      showMessage($("appMessage"), status === "done" ? "Incidencia revisada correctamente." : "Incidencia devuelta a pendiente.");
+      await loadAll();
+      window.scrollTo({ top:0, behavior:"smooth" });
+    }
+
+    async function handleExcelSelection(event) {
+      hideMessage($("importMessage"));
+      const file = event.target.files?.[0];
+      if (!file) return;
+      $("fileText").textContent = `📄 ${file.name}`;
+      try {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data, { type:"array", cellDates:true });
+        const sheetName = workbook.SheetNames[0];
+        const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+          defval:"",
+          raw:false,
+          dateNF:"yyyy-mm-dd"
+        });
+        const parsed = rows.map(parseExcelRow).filter(Boolean);
+        if (!parsed.length) throw new Error("No se encontraron filas válidas con CD y Trafo.");
+        state.importPlan = buildImportPlan(parsed);
+        renderImportPreview(state.importPlan);
+      } catch (err) {
+        console.error(err);
+        resetImport(false);
+        showMessage($("importMessage"), `No se pudo leer el Excel: ${err.message}`, "error");
+      }
+    }
+
+    function parseExcelRow(row) {
+      const cd = normalizeCd(row["CD"]);
+      const transformer = normalizeTrafo(row["TRAFO"] || row["Trafo"]);
+      const incidentCode = normalizeText(row["CODIGO DE INCIDENCIA"]);
+      if (!cd || !transformer || transformer === "SIN_TRAFO" || !incidentCode) return null;
+
+      const technicalData = cleanObject({
+        "CD": cd,
+        "Trafo": transformer,
+        "Código de incidencia": incidentCode,
+        "Incidencia": row["INCIDENCIA"],
+        "Comentarios de Endesa": row["COMENTARIOS"],
+        "LCL": row["LCL"],
+        "Localidad": row["LOCALIDAD"]
+      });
+
+      const location = normalizeText(row["LOCALIDAD"]) || "Sin localidad";
+
+      return {
+        id:`INC_${incidentCode.replace(/[^A-Z0-9_-]/gi, "_")}`,
+        cd,
+        transformer,
+        incidentCode,
+        location,
+        technicalData
+      };
+    }
+
+    function buildImportPlan(parsed) {
+      const incomingMap = new Map(parsed.map(x => [x.id, x]));
+      const currentMap = new Map(state.incidents.map(x => [x.id, x]));
+      const create = [], change = [], same = [], archive = [];
+
+      for (const incoming of parsed) {
+        const existing = currentMap.get(incoming.id);
+        if (!existing) {
+          create.push(incoming);
+        } else {
+          const sameTech = comparableTechnical(existing.technicalData) === comparableTechnical(incoming.technicalData);
+          const sameLocation = normalizeText(existing.location) === normalizeText(incoming.location);
+          if (sameTech && sameLocation && existing.archived !== true) same.push(incoming);
+          else change.push({ incoming, existing });
+        }
+      }
+
+      for (const existing of state.incidents) {
+        if (!existing.archived && !incomingMap.has(existing.id)) archive.push(existing);
+      }
+
+      return { parsed, create, change, same, archive };
+    }
+
+    function renderImportPreview(plan) {
+      $("newCount").textContent = plan.create.length;
+      $("changedCount").textContent = plan.change.length;
+      $("sameCount").textContent = plan.same.length;
+      $("toArchiveCount").textContent = plan.archive.length;
+      $("validCount").textContent = plan.parsed.length;
+      $("importPreview").classList.remove("hidden");
+      renderPreviewDetails(plan);
+      showMessage($("importMessage"),
+        "Previsualización completada. Los estados, comentarios y datos de finalización existentes se conservarán.",
+        "info");
+    }
+
+
+    function renderPreviewDetails(plan) {
+      const parts = [];
+
+      if (plan.create.length) {
+        parts.push(`
+          <div class="preview-section">
+            <h4>Nuevas (${plan.create.length})</h4>
+            <div class="preview-list">
+              ${plan.create.slice(0, 100).map(x => `
+                <div class="preview-item"><b>CD${escapeHtml(x.cd)} · ${escapeHtml(x.transformer)}</b>
+                <small>${escapeHtml(x.location || "Sin localidad")}</small></div>`).join("")}
+            </div>
+          </div>`);
+      }
+
+      if (plan.change.length) {
+        parts.push(`
+          <div class="preview-section">
+            <h4>Modificadas (${plan.change.length})</h4>
+            <div class="preview-list">
+              ${plan.change.slice(0, 100).map(({incoming, existing}) => {
+                const changes = [];
+                const oldTech = existing.technicalData || {};
+                const newTech = incoming.technicalData || {};
+                const keys = [...new Set([...Object.keys(oldTech), ...Object.keys(newTech)])];
+                keys.forEach(k => {
+                  const a = normalizeText(oldTech[k]);
+                  const b = normalizeText(newTech[k]);
+                  if (a !== b) changes.push(`${k}: "${a || "-"}" → "${b || "-"}"`);
+                });
+                if (normalizeText(existing.location) !== normalizeText(incoming.location)) {
+                  changes.unshift(`Localidad: "${existing.location || "-"}" → "${incoming.location || "-"}"`);
+                }
+                return `<div class="preview-item"><b>CD${escapeHtml(incoming.cd)} · ${escapeHtml(incoming.transformer)}</b>
+                  <small>${escapeHtml(changes.slice(0, 6).join(" | ") || "Datos técnicos actualizados")}</small></div>`;
+              }).join("")}
+            </div>
+          </div>`);
+      }
+
+      if (plan.archive.length) {
+        parts.push(`
+          <div class="preview-section">
+            <h4>A archivar (${plan.archive.length})</h4>
+            <div class="preview-list">
+              ${plan.archive.slice(0, 100).map(x => `
+                <div class="preview-item"><b>CD${escapeHtml(x.cd)} · ${escapeHtml(x.transformer)}</b>
+                <small>${escapeHtml(x.location || "Sin localidad")}</small></div>`).join("")}
+            </div>
+          </div>`);
+      }
+
+      if (!parts.length) {
+        parts.push('<div class="empty">No hay cambios que detallar.</div>');
+      }
+
+      $("previewDetails").innerHTML = parts.join("");
+    }
+
+    async function loadImportHistory() {
+      try {
+        const snap = await getDocs(collection(db, "incidentImports"));
+        const rows = snap.docs
+          .map(d => ({ id:d.id, ...d.data() }))
+          .sort((a,b) => {
+            const at = a.createdAt?.seconds || 0;
+            const bt = b.createdAt?.seconds || 0;
+            return bt - at;
+          })
+          .slice(0, 20);
+
+        const root = $("importHistory");
+        if (!rows.length) {
+          root.innerHTML = '<div class="empty">Aún no hay importaciones registradas.</div>';
+          return;
+        }
+
+        root.innerHTML = rows.map(x => {
+          const date = x.createdAt?.toDate ? x.createdAt.toDate().toLocaleString("es-ES") : "Fecha pendiente";
+          return `<div class="history-item">
+            <b>${escapeHtml(x.fileName || "Excel")}</b><br>
+            <small>${escapeHtml(date)} · ${escapeHtml(x.importedByName || "")}</small><br>
+            <span>${x.validRows || 0} filas · ${x.newCount || 0} nuevas · ${x.changedCount || 0} modificadas · ${x.archivedCount || 0} archivadas</span>
+          </div>`;
+        }).join("");
+      } catch (err) {
+        console.error("No se pudo cargar el historial", err);
+      }
+    }
+
+    async function executeImport() {
+      const plan = state.importPlan;
+      if (!plan) return;
+      if (!confirm(`¿Confirmar la importación de ${plan.parsed.length} incidencias válidas?`)) return;
+
+      $("confirmImportBtn").disabled = true;
+      showMessage($("importMessage"), "Importando incidencias…", "info");
+
+      try {
+        const operations = [];
+
+        plan.create.forEach(incoming => {
+          operations.push({
+            type:"set",
+            ref:doc(db, "incidents", incoming.id),
+            data:{
+              cd:incoming.cd,
+              transformer:incoming.transformer,
+              incidentCode:incoming.incidentCode,
+              location:incoming.location,
+              technicalData:incoming.technicalData,
+              status:"pending",
+              archived:false,
+              source:"excel",
+              createdAt:serverTimestamp(),
+              updatedAt:serverTimestamp(),
+              importedAt:serverTimestamp(),
+              importedBy:auth.currentUser.uid
+            }
+          });
+        });
+
+        plan.change.forEach(({incoming}) => {
+          operations.push({
+            type:"set",
+            ref:doc(db, "incidents", incoming.id),
+            data:{
+              cd:incoming.cd,
+              transformer:incoming.transformer,
+              incidentCode:incoming.incidentCode,
+              location:incoming.location,
+              technicalData:incoming.technicalData,
+              archived:false,
+              source:"excel",
+              updatedAt:serverTimestamp(),
+              importedAt:serverTimestamp(),
+              importedBy:auth.currentUser.uid
+            },
+            merge:true
+          });
+        });
+
+        plan.same.forEach(incoming => {
+          operations.push({
+            type:"set",
+            ref:doc(db, "incidents", incoming.id),
+            data:{
+              archived:false,
+              importedAt:serverTimestamp(),
+              importedBy:auth.currentUser.uid
+            },
+            merge:true
+          });
+        });
+
+        plan.archive.forEach(existing => {
+          operations.push({
+            type:"set",
+            ref:doc(db, "incidents", existing.id),
+            data:{
+              archived:true,
+              archivedAt:serverTimestamp(),
+              archivedBy:auth.currentUser.uid,
+              updatedAt:serverTimestamp()
+            },
+            merge:true
+          });
+        });
+
+        for (let i=0; i<operations.length; i+=400) {
+          const batch = writeBatch(db);
+          operations.slice(i, i+400).forEach(op => batch.set(op.ref, op.data, { merge:op.merge === true }));
+          await batch.commit();
+        }
+
+        await addDoc(collection(db, "incidentImports"), {
+          fileName:$("excelFile").files?.[0]?.name || "Excel",
+          validRows:plan.parsed.length,
+          newCount:plan.create.length,
+          changedCount:plan.change.length,
+          sameCount:plan.same.length,
+          archivedCount:plan.archive.length,
+          importedBy:auth.currentUser.uid,
+          importedByName:state.profile.name || auth.currentUser.email,
+          createdAt:serverTimestamp()
+        });
+
+        showMessage($("importMessage"),
+          `Importación completada: ${plan.create.length} nuevas, ${plan.change.length} modificadas y ${plan.archive.length} archivadas.`,
+          "ok");
+        await loadAll();
+        resetImport(false);
+      } catch (err) {
+        console.error(err);
+        showMessage($("importMessage"), `Error durante la importación: ${err.message}`, "error");
+      } finally {
+        $("confirmImportBtn").disabled = false;
+      }
+    }
+
+    function resetImport(clearMessage=true) {
+      state.importPlan = null;
+      $("excelFile").value = "";
+      $("fileText").textContent = "📥 Seleccionar Excel de incidencias";
+      $("importPreview").classList.add("hidden");
+      if (clearMessage) hideMessage($("importMessage"));
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, c => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
+      }[c]));
+    }
+
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("./service-worker.js").catch(console.error));
+    }
+  </script>
+</body>
+</html>
