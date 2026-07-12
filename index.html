@@ -68,6 +68,21 @@
     .preview-item small { display:block; margin-top:3px; }
     .history-list { display:grid; gap:10px; }
     .history-item { padding:12px; background:#f8fafb; border-radius:10px; border:1px solid #e5ebf0; }
+
+    .photo-block { margin-top:14px; padding:14px; border:1px solid #dfe8ee; border-radius:12px; background:#f8fafb; }
+    .photo-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+    .photo-head b { font-size:17px; }
+    .photo-count { font-size:14px; color:#526574; }
+    .photo-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+    .photo-actions button { width:auto; flex:1; min-width:150px; }
+    .photo-gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:10px; margin-top:12px; }
+    .photo-card { border:1px solid #dfe8ee; border-radius:10px; overflow:hidden; background:white; }
+    .photo-card img { width:100%; aspect-ratio:1/1; object-fit:cover; display:block; cursor:pointer; background:#eef3f6; }
+    .photo-card .photo-meta { padding:8px; font-size:12px; color:#526574; }
+    .photo-card button { border-radius:0; padding:9px; font-size:13px; }
+    .upload-progress { margin-top:10px; font-size:14px; color:#164d78; }
+    .photo-input { display:none; }
+
     @media(max-width:620px) {
       .detail-row { grid-template-columns:1fr; gap:2px; }
       .toolbar button { min-width:100%; }
@@ -175,6 +190,7 @@
   </section>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
     import {
@@ -183,8 +199,11 @@
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
     import {
       getFirestore, doc, getDoc, collection, getDocs, query, orderBy,
-      updateDoc, addDoc, serverTimestamp, writeBatch
+      updateDoc, addDoc, deleteDoc, serverTimestamp, writeBatch
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+    import {
+      getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject
+    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBpus4hK22UHkfpi0GAJ6Pou1SsUER61CE",
@@ -198,10 +217,11 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
+    const storage = getStorage(app);
     await setPersistence(auth, browserLocalPersistence);
 
     const $ = id => document.getElementById(id);
-    const state = { profile:null, incidents:[], users:[], importPlan:null };
+    const state = { profile:null, incidents:[], users:[], importPlan:null, photosByIncident:new Map() };
 
     function showMessage(el, text, type="ok") {
       el.textContent = text;
@@ -346,6 +366,20 @@
               <summary><b>Ver todos los datos de la incidencia</b></summary>
               <div class="details">${detailRows || '<p>Sin datos de la incidencia.</p>'}</div>
             </details>
+            <section class="photo-block">
+              <div class="photo-head">
+                <b>📷 Fotografías</b>
+                <span class="photo-count" id="photoCount_${x.id}">Cargando…</span>
+              </div>
+              <input class="photo-input" id="photoInput_${x.id}" type="file" accept="image/*" capture="environment" multiple />
+              <div class="photo-actions">
+                <button class="warning" data-photo-add="${x.id}">📸 Hacer o añadir fotos</button>
+                <button class="secondary" data-photo-view="${x.id}">🖼 Ver fotografías</button>
+                ${state.profile?.role === "admin" ? `<button class="primary" data-photo-download="${x.id}">⬇ Descargar todas</button>` : ""}
+              </div>
+              <div id="photoProgress_${x.id}" class="upload-progress hidden"></div>
+              <div id="photoGallery_${x.id}" class="photo-gallery hidden"></div>
+            </section>
             <label>Comentario (opcional)</label>
             <textarea id="comment_${x.id}" placeholder="Escribe un comentario libre...">${escapeHtml(x.comment || "")}</textarea>
             <div class="toolbar">
@@ -361,6 +395,218 @@
       root.querySelectorAll("[data-save]").forEach(btn => btn.onclick = () => saveComment(btn.dataset.save));
       root.querySelectorAll("[data-done]").forEach(btn => btn.onclick = () => setStatus(btn.dataset.done, "done"));
       root.querySelectorAll("[data-pending]").forEach(btn => btn.onclick = () => setStatus(btn.dataset.pending, "pending"));
+      root.querySelectorAll("[data-photo-add]").forEach(btn => {
+        const id = btn.dataset.photoAdd;
+        btn.onclick = () => $(`photoInput_${id}`).click();
+        $(`photoInput_${id}`).onchange = event => uploadIncidentPhotos(id, event.target.files);
+      });
+      root.querySelectorAll("[data-photo-view]").forEach(btn => btn.onclick = () => togglePhotoGallery(btn.dataset.photoView));
+      root.querySelectorAll("[data-photo-download]").forEach(btn => btn.onclick = () => downloadIncidentPhotos(btn.dataset.photoDownload));
+      rows.forEach(x => loadIncidentPhotos(x.id, false));
+    }
+
+    function safeFilePart(value) {
+      return String(value ?? "").trim().replace(/[^A-Z0-9_-]/gi, "_").replace(/_+/g, "_");
+    }
+
+    async function compressImage(file, maxDimension=1600, quality=0.82) {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+      const width = Math.max(1, Math.round(bitmap.width * scale));
+      const height = Math.max(1, Math.round(bitmap.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d", { alpha:false });
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      bitmap.close?.();
+      return await new Promise((resolve, reject) => {
+        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("No se pudo comprimir la fotografía.")), "image/jpeg", quality);
+      });
+    }
+
+    async function uploadIncidentPhotos(incidentId, fileList) {
+      const files = [...(fileList || [])].filter(file => file.type.startsWith("image/"));
+      if (!files.length) return;
+
+      const incident = state.incidents.find(x => x.id === incidentId);
+      if (!incident) return;
+
+      const progress = $(`photoProgress_${incidentId}`);
+      progress.classList.remove("hidden");
+
+      try {
+        for (let index = 0; index < files.length; index++) {
+          progress.textContent = `Preparando fotografía ${index + 1} de ${files.length}…`;
+          const blob = await compressImage(files[index]);
+          const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+          const fileName = `${safeFilePart(incident.cd)}_${safeFilePart(incident.transformer)}_${safeFilePart(incident.incidentCode)}_${stamp}_${index + 1}.jpg`;
+          const path = `incidents/${incidentId}/${fileName}`;
+          const ref = storageRef(storage, path);
+
+          progress.textContent = `Subiendo fotografía ${index + 1} de ${files.length}…`;
+          await uploadBytes(ref, blob, {
+            contentType:"image/jpeg",
+            customMetadata:{
+              incidentId,
+              cd:String(incident.cd || ""),
+              transformer:String(incident.transformer || ""),
+              incidentCode:String(incident.incidentCode || ""),
+              uploadedBy:auth.currentUser.uid,
+              uploadedByName:String(state.profile.name || auth.currentUser.email || "")
+            }
+          });
+          const downloadURL = await getDownloadURL(ref);
+          await addDoc(collection(db, "incidents", incidentId, "photos"), {
+            storagePath:path,
+            downloadURL,
+            fileName,
+            size:blob.size,
+            contentType:"image/jpeg",
+            uploadedBy:auth.currentUser.uid,
+            uploadedByName:state.profile.name || auth.currentUser.email,
+            createdAt:serverTimestamp()
+          });
+        }
+        progress.textContent = `${files.length} fotografía${files.length === 1 ? "" : "s"} subida${files.length === 1 ? "" : "s"} correctamente.`;
+        await loadIncidentPhotos(incidentId, true);
+      } catch (err) {
+        console.error(err);
+        progress.textContent = `Error al subir fotografías: ${err.message}`;
+      } finally {
+        const input = $(`photoInput_${incidentId}`);
+        if (input) input.value = "";
+      }
+    }
+
+    async function loadIncidentPhotos(incidentId, showGallery=false) {
+      try {
+        const snap = await getDocs(collection(db, "incidents", incidentId, "photos"));
+        const photos = snap.docs.map(d => ({ id:d.id, ...d.data() }))
+          .sort((a,b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+        state.photosByIncident.set(incidentId, photos);
+
+        const count = $(`photoCount_${incidentId}`);
+        if (count) count.textContent = `${photos.length} fotografía${photos.length === 1 ? "" : "s"}`;
+
+        if (showGallery) {
+          const gallery = $(`photoGallery_${incidentId}`);
+          gallery?.classList.remove("hidden");
+          renderPhotoGallery(incidentId);
+        }
+      } catch (err) {
+        console.error("No se pudieron cargar las fotos", err);
+        const count = $(`photoCount_${incidentId}`);
+        if (count) count.textContent = "No disponible";
+      }
+    }
+
+    async function togglePhotoGallery(incidentId) {
+      const gallery = $(`photoGallery_${incidentId}`);
+      if (!gallery) return;
+      if (gallery.classList.contains("hidden")) {
+        await loadIncidentPhotos(incidentId, true);
+      } else {
+        gallery.classList.add("hidden");
+      }
+    }
+
+    function renderPhotoGallery(incidentId) {
+      const gallery = $(`photoGallery_${incidentId}`);
+      if (!gallery) return;
+      const photos = state.photosByIncident.get(incidentId) || [];
+      if (!photos.length) {
+        gallery.innerHTML = '<div class="empty">Todavía no hay fotografías.</div>';
+        return;
+      }
+
+      gallery.innerHTML = photos.map((photo, index) => {
+        const canDelete = state.profile?.role === "admin" || photo.uploadedBy === auth.currentUser.uid;
+        const date = photo.createdAt?.toDate ? photo.createdAt.toDate().toLocaleString("es-ES") : "";
+        return `<div class="photo-card">
+          <img src="${escapeHtml(photo.downloadURL)}" alt="Fotografía ${index + 1}" data-photo-open="${escapeHtml(photo.downloadURL)}">
+          <div class="photo-meta">
+            Foto ${index + 1}<br>
+            ${escapeHtml(photo.uploadedByName || "")}
+            ${date ? `<br>${escapeHtml(date)}` : ""}
+          </div>
+          ${canDelete ? `<button class="danger" data-photo-delete="${photo.id}" data-incident-id="${incidentId}">Eliminar</button>` : ""}
+        </div>`;
+      }).join("");
+
+      gallery.querySelectorAll("[data-photo-open]").forEach(img => {
+        img.onclick = () => window.open(img.dataset.photoOpen, "_blank", "noopener");
+      });
+      gallery.querySelectorAll("[data-photo-delete]").forEach(btn => {
+        btn.onclick = () => deleteIncidentPhoto(btn.dataset.incidentId, btn.dataset.photoDelete);
+      });
+    }
+
+    async function deleteIncidentPhoto(incidentId, photoId) {
+      const photos = state.photosByIncident.get(incidentId) || [];
+      const photo = photos.find(x => x.id === photoId);
+      if (!photo || !confirm("¿Eliminar esta fotografía?")) return;
+
+      try {
+        await deleteObject(storageRef(storage, photo.storagePath));
+        await deleteDoc(doc(db, "incidents", incidentId, "photos", photoId));
+        showMessage($("appMessage"), "Fotografía eliminada.");
+        await loadIncidentPhotos(incidentId, true);
+      } catch (err) {
+        console.error(err);
+        showMessage($("appMessage"), `No se pudo eliminar la fotografía: ${err.message}`, "error");
+      }
+    }
+
+    async function downloadIncidentPhotos(incidentId) {
+      let photos = state.photosByIncident.get(incidentId);
+      if (!photos) {
+        await loadIncidentPhotos(incidentId, false);
+        photos = state.photosByIncident.get(incidentId) || [];
+      }
+      if (!photos.length) {
+        showMessage($("appMessage"), "Este trabajo todavía no tiene fotografías.", "info");
+        return;
+      }
+
+      const incident = state.incidents.find(x => x.id === incidentId);
+      const baseName = `CD${safeFilePart(incident?.cd)}_${safeFilePart(incident?.transformer)}_INC_${safeFilePart(incident?.incidentCode)}`;
+      showMessage($("appMessage"), `Preparando ${photos.length} fotografías para descargar…`, "info");
+
+      try {
+        const zip = new JSZip();
+        for (let index = 0; index < photos.length; index++) {
+          const response = await fetch(photos[index].downloadURL);
+          if (!response.ok) throw new Error(`No se pudo descargar la fotografía ${index + 1}.`);
+          const blob = await response.blob();
+          zip.file(`${baseName}_${String(index + 1).padStart(2, "0")}.jpg`, blob);
+        }
+
+        const resumen = [
+          `CD: ${incident?.cd || ""}`,
+          `Trafo: ${incident?.transformer || ""}`,
+          `Código de incidencia: ${incident?.incidentCode || ""}`,
+          `Localidad: ${incident?.location || ""}`,
+          `Número de fotografías: ${photos.length}`,
+          `Descargado por: ${state.profile.name || auth.currentUser.email}`,
+          `Fecha de descarga: ${new Date().toLocaleString("es-ES")}`
+        ].join("\n");
+        zip.file("resumen.txt", resumen);
+
+        const zipBlob = await zip.generateAsync({ type:"blob" });
+        const url = URL.createObjectURL(zipBlob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${baseName}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        showMessage($("appMessage"), "Descarga preparada correctamente.");
+      } catch (err) {
+        console.error(err);
+        showMessage($("appMessage"), `No se pudo preparar la descarga: ${err.message}`, "error");
+      }
     }
 
     async function saveComment(id) {
