@@ -110,7 +110,7 @@
 
   <section id="appScreen" class="screen hidden">
     <div class="topbar">
-      <div><strong>Control Ametel · LVS INCIDENCIAS</strong><br><small id="userLabel" style="color:#dbe7ef"></small></div>
+      <div><strong>Control Ametel · LVS INCIDENCIAS v1.2</strong><br><small id="userLabel" style="color:#dbe7ef"></small></div>
       <button id="logoutBtn">Salir</button>
     </div>
 
@@ -532,7 +532,7 @@
             ${date ? `<br>${escapeHtml(date)}` : ""}
           </div>
           ${state.profile?.role === "admin" && !isMobileDevice
-            ? `<button class="primary" data-photo-download-one="${photo.id}" data-incident-id="${incidentId}" data-photo-index="${index + 1}">Descargar foto</button>`
+            ? `<button class="primary" data-photo-download-one="${photo.id}" data-incident-id="${incidentId}" data-photo-index="${index + 1}">Abrir para guardar</button>`
             : ""}
           ${canDelete ? `<button class="danger" data-photo-delete="${photo.id}" data-incident-id="${incidentId}">Eliminar</button>` : ""}
         </div>`;
@@ -579,36 +579,34 @@
       const photos = state.photosByIncident.get(incidentId) || [];
       const photo = photos.find(x => x.id === photoId);
 
-      if (!incident || !photo?.storagePath) {
+      if (!incident || !photo?.downloadURL) {
         showMessage($("appMessage"), "No se ha podido localizar esta fotografía.", "error");
         return;
       }
 
+      const fileName = `CD${safeFilePart(incident.cd)}_${safeFilePart(incident.transformer)}_${String(photoIndex).padStart(2, "0")}.jpg`;
       const progress = $(`photoProgress_${incidentId}`);
       progress.classList.remove("hidden");
-      progress.textContent = `Preparando fotografía ${photoIndex}…`;
 
       try {
-        const blob = await getBlob(storageRef(storage, photo.storagePath));
-        const fileName = `CD${safeFilePart(incident.cd)}_${safeFilePart(incident.transformer)}_${String(photoIndex).padStart(2, "0")}.jpg`;
+        // Copiamos el nombre recomendado para que el usuario pueda pegarlo al guardar.
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(fileName).catch(() => {});
+        }
 
-        const objectUrl = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = objectUrl;
-        link.download = fileName;
-        link.rel = "noopener";
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
+        // Abrimos la imagen directamente desde Firebase Storage.
+        // Este método evita los bloqueos CORS de getBlob/fetch.
+        const opened = window.open(photo.downloadURL, "_blank", "noopener");
+        if (!opened) {
+          throw new Error("El navegador ha bloqueado la ventana emergente.");
+        }
 
-        setTimeout(() => URL.revokeObjectURL(objectUrl), 15000);
-        progress.textContent = `Fotografía descargada como ${fileName}.`;
+        progress.textContent = `Imagen abierta. Al guardarla, usa el nombre ${fileName}. El nombre se ha copiado al portapapeles.`;
       } catch (err) {
         console.error(err);
-        progress.textContent = `No se pudo descargar la fotografía: ${err.message}`;
+        progress.textContent = `No se pudo abrir la fotografía: ${err.message}`;
       }
     }
-
 
     async function saveComment(id) {
       const text = $(`comment_${id}`).value.trim();

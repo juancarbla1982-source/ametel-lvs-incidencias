@@ -1,0 +1,16 @@
+CONTROL AMETEL · LVS INCIDENCIAS · VERSIÓN 1.2
+
+CAMBIO PRINCIPAL
+- La descarga individual deja de usar getBlob/fetch.
+- En PC, cada foto incluye el botón "Abrir para guardar".
+- La imagen se abre directamente desde Firebase Storage.
+- El nombre recomendado se copia automáticamente al portapapeles:
+  CD103270_TR1_01.jpg
+
+PASOS PARA GUARDAR
+1. Pulsar "Abrir para guardar".
+2. En la pestaña nueva, pulsar el icono de descarga del navegador
+   o botón derecho > Guardar imagen como.
+3. Pegar el nombre copiado.
+
+También se ha actualizado la caché del service worker a v1.2.
