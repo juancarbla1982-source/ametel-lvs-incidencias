@@ -377,9 +377,7 @@
               <div class="photo-actions">
                 <button class="warning" data-photo-add="${x.id}">📸 Hacer o añadir fotos</button>
                 <button class="secondary" data-photo-view="${x.id}">🖼 Ver fotografías</button>
-                ${state.profile?.role === "admin" && !isMobileDevice
-                  ? `<button class="primary" data-photo-download="${x.id}">⬇ Descargar fotos en ZIP</button>`
-                  : ""}
+                
               </div>
               <div id="photoProgress_${x.id}" class="upload-progress hidden"></div>
               <div id="photoGallery_${x.id}" class="photo-gallery hidden"></div>
@@ -405,7 +403,6 @@
         $(`photoInput_${id}`).onchange = event => uploadIncidentPhotos(id, event.target.files);
       });
       root.querySelectorAll("[data-photo-view]").forEach(btn => btn.onclick = () => togglePhotoGallery(btn.dataset.photoView));
-      root.querySelectorAll("[data-photo-download]").forEach(btn => btn.onclick = () => downloadIncidentPhotosOnPc(btn.dataset.photoDownload));
       rows.forEach(x => loadIncidentPhotos(x.id, false));
     }
 
@@ -534,12 +531,22 @@
             ${escapeHtml(photo.uploadedByName || "")}
             ${date ? `<br>${escapeHtml(date)}` : ""}
           </div>
+          ${state.profile?.role === "admin" && !isMobileDevice
+            ? `<button class="primary" data-photo-download-one="${photo.id}" data-incident-id="${incidentId}" data-photo-index="${index + 1}">Descargar foto</button>`
+            : ""}
           ${canDelete ? `<button class="danger" data-photo-delete="${photo.id}" data-incident-id="${incidentId}">Eliminar</button>` : ""}
         </div>`;
       }).join("");
 
       gallery.querySelectorAll("[data-photo-open]").forEach(img => {
         img.onclick = () => window.open(img.dataset.photoOpen, "_blank", "noopener");
+      });
+      gallery.querySelectorAll("[data-photo-download-one]").forEach(btn => {
+        btn.onclick = () => downloadSingleIncidentPhoto(
+          btn.dataset.incidentId,
+          btn.dataset.photoDownloadOne,
+          Number(btn.dataset.photoIndex || 1)
+        );
       });
       gallery.querySelectorAll("[data-photo-delete]").forEach(btn => {
         btn.onclick = () => deleteIncidentPhoto(btn.dataset.incidentId, btn.dataset.photoDelete);
@@ -562,73 +569,43 @@
       }
     }
 
-    async function downloadIncidentPhotosOnPc(incidentId) {
+    async function downloadSingleIncidentPhoto(incidentId, photoId, photoIndex) {
       if (isMobileDevice) {
-        showMessage($("appMessage"), "La descarga de fotografías está disponible desde el panel de administrador en un ordenador.", "info");
-        return;
-      }
-
-      let photos = state.photosByIncident.get(incidentId);
-      if (!photos) {
-        await loadIncidentPhotos(incidentId, false);
-        photos = state.photosByIncident.get(incidentId) || [];
-      }
-      if (!photos.length) {
-        showMessage($("appMessage"), "Este trabajo todavía no tiene fotografías.", "info");
+        showMessage($("appMessage"), "La descarga de fotografías está disponible desde un ordenador.", "info");
         return;
       }
 
       const incident = state.incidents.find(x => x.id === incidentId);
-      const baseName = `CD${safeFilePart(incident?.cd)}_${safeFilePart(incident?.transformer)}_INC_${safeFilePart(incident?.incidentCode)}`;
+      const photos = state.photosByIncident.get(incidentId) || [];
+      const photo = photos.find(x => x.id === photoId);
+
+      if (!incident || !photo?.storagePath) {
+        showMessage($("appMessage"), "No se ha podido localizar esta fotografía.", "error");
+        return;
+      }
+
       const progress = $(`photoProgress_${incidentId}`);
       progress.classList.remove("hidden");
-      progress.textContent = `Preparando ${photos.length} fotografías…`;
+      progress.textContent = `Preparando fotografía ${photoIndex}…`;
 
       try {
-        const zip = new JSZip();
+        const blob = await getBlob(storageRef(storage, photo.storagePath));
+        const fileName = `CD${safeFilePart(incident.cd)}_${safeFilePart(incident.transformer)}_${String(photoIndex).padStart(2, "0")}.jpg`;
 
-        for (let index = 0; index < photos.length; index++) {
-          progress.textContent = `Descargando fotografía ${index + 1} de ${photos.length}…`;
-          const response = await fetch(photos[index].downloadURL, { cache:"no-store" });
-          if (!response.ok) {
-            throw new Error(`No se pudo descargar la fotografía ${index + 1}.`);
-          }
-          const blob = await response.blob();
-          zip.file(`${baseName}_${String(index + 1).padStart(2, "0")}.jpg`, blob);
-        }
-
-        const resumen = [
-          `CD: ${incident?.cd || ""}`,
-          `Trafo: ${incident?.transformer || ""}`,
-          `Código de incidencia: ${incident?.incidentCode || ""}`,
-          `Localidad: ${incident?.location || ""}`,
-          `Número de fotografías: ${photos.length}`,
-          `Comentario: ${incident?.comment || ""}`,
-          `Descargado por: ${state.profile.name || auth.currentUser.email}`,
-          `Fecha de descarga: ${new Date().toLocaleString("es-ES")}`
-        ].join("\n");
-        zip.file("resumen.txt", resumen);
-
-        progress.textContent = "Creando archivo ZIP…";
-        const zipBlob = await zip.generateAsync({
-          type:"blob",
-          compression:"DEFLATE",
-          compressionOptions:{ level:6 }
-        });
-
-        const url = URL.createObjectURL(zipBlob);
+        const objectUrl = URL.createObjectURL(blob);
         const link = document.createElement("a");
-        link.href = url;
-        link.download = `${baseName}.zip`;
+        link.href = objectUrl;
+        link.download = fileName;
+        link.rel = "noopener";
         document.body.appendChild(link);
         link.click();
         link.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 15000);
 
-        progress.textContent = "ZIP descargado correctamente.";
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 15000);
+        progress.textContent = `Fotografía descargada como ${fileName}.`;
       } catch (err) {
         console.error(err);
-        progress.textContent = `No se pudo descargar el ZIP: ${err.message}`;
+        progress.textContent = `No se pudo descargar la fotografía: ${err.message}`;
       }
     }
 
