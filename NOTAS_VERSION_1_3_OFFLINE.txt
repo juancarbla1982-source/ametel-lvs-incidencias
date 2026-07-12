@@ -1,0 +1,8 @@
+LVS INCIDENCIAS v1.3 OFFLINE
+
+Las fotos se guardan primero en el almacenamiento interno de la aplicación (IndexedDB).
+Sin cobertura quedan pendientes y se sincronizan al recuperar conexión, al reabrir la app
+o al volver a primer plano. No se eliminan de la cola hasta confirmar la subida a Firebase.
+
+La app debe abrirse o quedar en primer plano para completar la sincronización.
+No desinstales la app ni borres sus datos mientras existan fotos pendientes.
