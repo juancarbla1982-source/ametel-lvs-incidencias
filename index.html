@@ -221,7 +221,7 @@
     await setPersistence(auth, browserLocalPersistence);
 
     const $ = id => document.getElementById(id);
-    const state = { profile:null, incidents:[], users:[], importPlan:null, photosByIncident:new Map() };
+    const state = { profile:null, incidents:[], users:[], importPlan:null, photosByIncident:new Map(), preparedZips:new Map() };
 
     function showMessage(el, text, type="ok") {
       el.textContent = text;
@@ -375,7 +375,10 @@
               <div class="photo-actions">
                 <button class="warning" data-photo-add="${x.id}">📸 Hacer o añadir fotos</button>
                 <button class="secondary" data-photo-view="${x.id}">🖼 Ver fotografías</button>
-                ${state.profile?.role === "admin" ? `<button class="primary" data-photo-download="${x.id}">⬇ Descargar todas</button>` : ""}
+                ${state.profile?.role === "admin" ? `
+                  <button class="primary" data-photo-download="${x.id}">⬇ Preparar descarga</button>
+                  <button class="success hidden" id="photoSave_${x.id}" data-photo-save="${x.id}">💾 Guardar o compartir ZIP</button>
+                ` : ""}
               </div>
               <div id="photoProgress_${x.id}" class="upload-progress hidden"></div>
               <div id="photoGallery_${x.id}" class="photo-gallery hidden"></div>
@@ -401,7 +404,8 @@
         $(`photoInput_${id}`).onchange = event => uploadIncidentPhotos(id, event.target.files);
       });
       root.querySelectorAll("[data-photo-view]").forEach(btn => btn.onclick = () => togglePhotoGallery(btn.dataset.photoView));
-      root.querySelectorAll("[data-photo-download]").forEach(btn => btn.onclick = () => downloadIncidentPhotos(btn.dataset.photoDownload));
+      root.querySelectorAll("[data-photo-download]").forEach(btn => btn.onclick = () => prepareIncidentPhotosZip(btn.dataset.photoDownload));
+      root.querySelectorAll("[data-photo-save]").forEach(btn => btn.onclick = () => savePreparedZip(btn.dataset.photoSave));
       rows.forEach(x => loadIncidentPhotos(x.id, false));
     }
 
@@ -558,7 +562,7 @@
       }
     }
 
-    async function downloadIncidentPhotos(incidentId) {
+    async function prepareIncidentPhotosZip(incidentId) {
       let photos = state.photosByIncident.get(incidentId);
       if (!photos) {
         await loadIncidentPhotos(incidentId, false);
@@ -572,7 +576,9 @@
       const incident = state.incidents.find(x => x.id === incidentId);
       const baseName = `CD${safeFilePart(incident?.cd)}_${safeFilePart(incident?.transformer)}_INC_${safeFilePart(incident?.incidentCode)}`;
       const progress = $(`photoProgress_${incidentId}`);
+      const saveBtn = $(`photoSave_${incidentId}`);
       progress.classList.remove("hidden");
+      saveBtn?.classList.add("hidden");
       progress.textContent = `Preparando ${photos.length} fotografías…`;
 
       try {
@@ -596,38 +602,60 @@
         zip.file("resumen.txt", resumen);
 
         progress.textContent = "Creando archivo ZIP…";
-        const zipBlob = await zip.generateAsync({ type:"blob", compression:"DEFLATE", compressionOptions:{ level:6 } });
+        const zipBlob = await zip.generateAsync({
+          type:"blob",
+          compression:"DEFLATE",
+          compressionOptions:{ level:6 }
+        });
         const fileName = `${baseName}.zip`;
         const zipFile = new File([zipBlob], fileName, { type:"application/zip" });
 
-        if (navigator.canShare?.({ files:[zipFile] })) {
-          progress.textContent = "Abriendo opciones para guardar o compartir…";
+        state.preparedZips.set(incidentId, { blob:zipBlob, file:zipFile, fileName });
+        progress.textContent = "ZIP preparado. Pulsa «Guardar o compartir ZIP».";
+        saveBtn?.classList.remove("hidden");
+      } catch (err) {
+        console.error(err);
+        progress.textContent = `No se pudo preparar la descarga: ${err.message}`;
+      }
+    }
+
+    async function savePreparedZip(incidentId) {
+      const prepared = state.preparedZips.get(incidentId);
+      const progress = $(`photoProgress_${incidentId}`);
+      if (!prepared) {
+        progress.classList.remove("hidden");
+        progress.textContent = "Primero pulsa «Preparar descarga».";
+        return;
+      }
+
+      try {
+        // Este segundo toque conserva la activación del usuario necesaria en Android.
+        if (navigator.canShare?.({ files:[prepared.file] })) {
           await navigator.share({
-            files:[zipFile],
-            title:fileName,
-            text:`Fotografías de ${baseName}`
+            files:[prepared.file],
+            title:prepared.fileName,
+            text:"Fotografías de la incidencia"
           });
-          progress.textContent = "Archivo ZIP preparado correctamente.";
-        } else {
-          const url = URL.createObjectURL(zipBlob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = fileName;
-          a.style.display = "none";
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(() => {
-            a.remove();
-            URL.revokeObjectURL(url);
-          }, 3000);
-          progress.textContent = "Archivo ZIP descargado correctamente.";
+          progress.textContent = "ZIP compartido o guardado correctamente.";
+          return;
         }
+
+        const url = URL.createObjectURL(prepared.blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = prepared.fileName;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        progress.textContent = "Descarga iniciada.";
       } catch (err) {
         console.error(err);
         if (err?.name === "AbortError") {
-          progress.textContent = "Descarga cancelada.";
+          progress.textContent = "Operación cancelada.";
         } else {
-          progress.textContent = `No se pudo preparar la descarga: ${err.message}`;
+          progress.textContent = `No se pudo guardar el ZIP: ${err.message}`;
         }
       }
     }
