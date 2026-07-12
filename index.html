@@ -202,7 +202,7 @@
       updateDoc, addDoc, deleteDoc, serverTimestamp, writeBatch
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
     import {
-      getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject
+      getStorage, ref as storageRef, uploadBytes, getDownloadURL, getBlob, deleteObject
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 
     const firebaseConfig = {
@@ -571,14 +571,15 @@
 
       const incident = state.incidents.find(x => x.id === incidentId);
       const baseName = `CD${safeFilePart(incident?.cd)}_${safeFilePart(incident?.transformer)}_INC_${safeFilePart(incident?.incidentCode)}`;
-      showMessage($("appMessage"), `Preparando ${photos.length} fotografías para descargar…`, "info");
+      const progress = $(`photoProgress_${incidentId}`);
+      progress.classList.remove("hidden");
+      progress.textContent = `Preparando ${photos.length} fotografías…`;
 
       try {
         const zip = new JSZip();
         for (let index = 0; index < photos.length; index++) {
-          const response = await fetch(photos[index].downloadURL);
-          if (!response.ok) throw new Error(`No se pudo descargar la fotografía ${index + 1}.`);
-          const blob = await response.blob();
+          progress.textContent = `Descargando fotografía ${index + 1} de ${photos.length}…`;
+          const blob = await getBlob(storageRef(storage, photos[index].storagePath));
           zip.file(`${baseName}_${String(index + 1).padStart(2, "0")}.jpg`, blob);
         }
 
@@ -588,24 +589,46 @@
           `Código de incidencia: ${incident?.incidentCode || ""}`,
           `Localidad: ${incident?.location || ""}`,
           `Número de fotografías: ${photos.length}`,
+          `Comentario: ${incident?.comment || ""}`,
           `Descargado por: ${state.profile.name || auth.currentUser.email}`,
           `Fecha de descarga: ${new Date().toLocaleString("es-ES")}`
         ].join("\n");
         zip.file("resumen.txt", resumen);
 
-        const zipBlob = await zip.generateAsync({ type:"blob" });
-        const url = URL.createObjectURL(zipBlob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${baseName}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        showMessage($("appMessage"), "Descarga preparada correctamente.");
+        progress.textContent = "Creando archivo ZIP…";
+        const zipBlob = await zip.generateAsync({ type:"blob", compression:"DEFLATE", compressionOptions:{ level:6 } });
+        const fileName = `${baseName}.zip`;
+        const zipFile = new File([zipBlob], fileName, { type:"application/zip" });
+
+        if (navigator.canShare?.({ files:[zipFile] })) {
+          progress.textContent = "Abriendo opciones para guardar o compartir…";
+          await navigator.share({
+            files:[zipFile],
+            title:fileName,
+            text:`Fotografías de ${baseName}`
+          });
+          progress.textContent = "Archivo ZIP preparado correctamente.";
+        } else {
+          const url = URL.createObjectURL(zipBlob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = fileName;
+          a.style.display = "none";
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            a.remove();
+            URL.revokeObjectURL(url);
+          }, 3000);
+          progress.textContent = "Archivo ZIP descargado correctamente.";
+        }
       } catch (err) {
         console.error(err);
-        showMessage($("appMessage"), `No se pudo preparar la descarga: ${err.message}`, "error");
+        if (err?.name === "AbortError") {
+          progress.textContent = "Descarga cancelada.";
+        } else {
+          progress.textContent = `No se pudo preparar la descarga: ${err.message}`;
+        }
       }
     }
 
