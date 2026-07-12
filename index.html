@@ -110,7 +110,7 @@
 
   <section id="appScreen" class="screen hidden">
     <div class="topbar">
-      <div><strong>Control Ametel · LVS INCIDENCIAS v1.3 OFFLINE</strong><br><small id="userLabel" style="color:#dbe7ef"></small></div>
+      <div><strong>Control Ametel · LVS INCIDENCIAS v1.4 OFFLINE COMPLETO</strong><br><small id="userLabel" style="color:#dbe7ef"></small></div>
       <button id="logoutBtn">Salir</button>
     </div>
 
@@ -296,6 +296,73 @@
     const OFFLINE_APP_NAME = "incidents";
     let syncingOfflinePhotos = false;
 
+    const OFFLINE_CHANGE_STORE = "pendingChanges";
+
+    function openOfflineChangeDb() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(OFFLINE_DB_NAME, 2);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains(OFFLINE_STORE)) {
+            const store = db.createObjectStore(OFFLINE_STORE, { keyPath:"queueId" });
+            store.createIndex("app", "app", { unique:false });
+            store.createIndex("parentId", "parentId", { unique:false });
+            store.createIndex("createdAtMs", "createdAtMs", { unique:false });
+          }
+          if (!db.objectStoreNames.contains(OFFLINE_CHANGE_STORE)) {
+            const store = db.createObjectStore(OFFLINE_CHANGE_STORE, { keyPath:"changeId" });
+            store.createIndex("app", "app", { unique:false });
+            store.createIndex("parentId", "parentId", { unique:false });
+            store.createIndex("createdAtMs", "createdAtMs", { unique:false });
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    async function queueOfflineChange(entry) {
+      const db = await openOfflineChangeDb();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(OFFLINE_CHANGE_STORE, "readwrite");
+        tx.objectStore(OFFLINE_CHANGE_STORE).put(entry);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    }
+
+    async function getOfflineChanges(appName) {
+      const db = await openOfflineChangeDb();
+      const rows = await new Promise((resolve, reject) => {
+        const tx = db.transaction(OFFLINE_CHANGE_STORE, "readonly");
+        const request = tx.objectStore(OFFLINE_CHANGE_STORE).index("app").getAll(appName);
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+      return rows.sort((a,b) => a.createdAtMs - b.createdAtMs);
+    }
+
+    async function removeOfflineChange(changeId) {
+      const db = await openOfflineChangeDb();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(OFFLINE_CHANGE_STORE, "readwrite");
+        tx.objectStore(OFFLINE_CHANGE_STORE).delete(changeId);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    }
+
+    async function countOfflineChanges(appName, parentId=null) {
+      const rows = await getOfflineChanges(appName);
+      return parentId ? rows.filter(x => x.parentId === parentId).length : rows.length;
+    }
+
+    const OFFLINE_CHANGE_APP = "incidents";
+    let syncingOfflineChanges = false;
+
     function showMessage(el, text, type="ok") {
       el.textContent = text;
       el.className = `status ${type}`;
@@ -367,6 +434,7 @@
         await requestPersistentStorage();
         await loadAll();
         await syncOfflineIncidentPhotos();
+        await syncOfflineIncidentChanges();
       } catch (err) {
         console.error(err);
         await signOut(auth);
@@ -464,6 +532,7 @@
                 : `<button class="success" data-done="${x.id}">Marcar incidencia revisada</button>`}
             </div>
             ${x.completedByName ? `<small>Revisada por ${escapeHtml(x.completedByName)}.</small>` : ""}
+            <small id="changePending_${x.id}" style="display:block;color:#8b5a00"></small>
           </article>`;
       }).join("");
 
@@ -476,7 +545,7 @@
         $(`photoInput_${id}`).onchange = event => uploadIncidentPhotos(id, event.target.files);
       });
       root.querySelectorAll("[data-photo-view]").forEach(btn => btn.onclick = () => togglePhotoGallery(btn.dataset.photoView));
-      rows.forEach(x => loadIncidentPhotos(x.id, false));
+      rows.forEach(x => { loadIncidentPhotos(x.id, false); updateIncidentChangePendingCount(x.id); });
     }
 
     function safeFilePart(value) {
@@ -728,42 +797,152 @@
 
     async function saveComment(id) {
       const text = $(`comment_${id}`).value.trim();
-      await updateDoc(doc(db, "incidents", id), {
-        comment:text,
-        commentBy:auth.currentUser.uid,
-        commentByName:state.profile.name || auth.currentUser.email,
-        commentAt:serverTimestamp(),
-        updatedAt:serverTimestamp()
-      });
-      if (text) {
-        await addDoc(collection(db, "incidents", id, "comments"), {
-          text,
-          userId:auth.currentUser.uid,
-          userName:state.profile.name || auth.currentUser.email,
-          createdAt:serverTimestamp()
-        });
+      const change = {
+        changeId: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random()}`,
+        app:OFFLINE_CHANGE_APP,
+        parentId:id,
+        type:"comment",
+        payload:{
+          comment:text,
+          commentBy:auth.currentUser.uid,
+          commentByName:state.profile.name || auth.currentUser.email
+        },
+        createdAtMs:Date.now()
+      };
+
+      if (!navigator.onLine) {
+        await queueOfflineChange(change);
+        const current = state.incidents.find(x => x.id === id);
+        if (current) current.comment = text;
+        showMessage($("appMessage"), "Comentario guardado en el teléfono. Se sincronizará al recuperar cobertura.", "info");
+        await updateIncidentChangePendingCount(id);
+        return;
       }
-      showMessage($("appMessage"), "Comentario guardado.");
-      await loadAll();
+
+      try {
+        await applyIncidentChange(change);
+        showMessage($("appMessage"), "Comentario guardado.");
+        await loadAll();
+      } catch (err) {
+        console.error(err);
+        await queueOfflineChange(change);
+        showMessage($("appMessage"), "No hubo conexión. El comentario queda pendiente de sincronizar.", "info");
+        await updateIncidentChangePendingCount(id);
+      }
     }
 
     async function setStatus(id, status) {
       const current = state.incidents.find(x => x.id === id);
       const commentText = $(`comment_${id}`)?.value.trim() || current?.comment || "";
-      await updateDoc(doc(db, "incidents", id), {
-        status,
-        comment:commentText,
-        commentBy:commentText ? auth.currentUser.uid : (current?.commentBy || null),
-        commentByName:commentText ? (state.profile.name || auth.currentUser.email) : (current?.commentByName || null),
-        commentAt:commentText ? serverTimestamp() : (current?.commentAt || null),
-        completedBy: status === "done" ? auth.currentUser.uid : null,
-        completedByName: status === "done" ? (state.profile.name || auth.currentUser.email) : null,
-        completedAt: status === "done" ? serverTimestamp() : null,
-        updatedAt:serverTimestamp()
-      });
-      showMessage($("appMessage"), status === "done" ? "Incidencia revisada correctamente." : "Incidencia devuelta a pendiente.");
-      await loadAll();
-      window.scrollTo({ top:0, behavior:"smooth" });
+      const change = {
+        changeId: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random()}`,
+        app:OFFLINE_CHANGE_APP,
+        parentId:id,
+        type:"status",
+        payload:{
+          status,
+          comment:commentText,
+          completedBy: status === "done" ? auth.currentUser.uid : null,
+          completedByName: status === "done" ? (state.profile.name || auth.currentUser.email) : null,
+          userName: state.profile.name || auth.currentUser.email,
+          userId: auth.currentUser.uid
+        },
+        createdAtMs:Date.now()
+      };
+
+      if (!navigator.onLine) {
+        await queueOfflineChange(change);
+        if (current) {
+          current.status = status;
+          current.comment = commentText;
+          current.completedBy = change.payload.completedBy;
+          current.completedByName = change.payload.completedByName;
+        }
+        renderIncidents();
+        showMessage($("appMessage"),
+          status === "done"
+            ? "Incidencia marcada como revisada en el teléfono. Se sincronizará al recuperar cobertura."
+            : "Incidencia devuelta a pendiente en el teléfono. Se sincronizará al recuperar cobertura.",
+          "info"
+        );
+        await updateIncidentChangePendingCount(id);
+        return;
+      }
+
+      try {
+        await applyIncidentChange(change);
+        showMessage($("appMessage"), status === "done" ? "Incidencia revisada correctamente." : "Incidencia devuelta a pendiente.");
+        await loadAll();
+        window.scrollTo({ top:0, behavior:"smooth" });
+      } catch (err) {
+        console.error(err);
+        await queueOfflineChange(change);
+        if (current) current.status = status;
+        renderIncidents();
+        showMessage($("appMessage"), "No hubo conexión. El cambio queda pendiente de sincronizar.", "info");
+        await updateIncidentChangePendingCount(id);
+      }
+    }
+
+    async function applyIncidentChange(change) {
+      if (change.type === "comment") {
+        const p = change.payload;
+        await updateDoc(doc(db, "incidents", change.parentId), {
+          comment:p.comment,
+          commentBy:p.commentBy,
+          commentByName:p.commentByName,
+          commentAt:serverTimestamp(),
+          updatedAt:serverTimestamp()
+        });
+        if (p.comment) {
+          await addDoc(collection(db, "incidents", change.parentId, "comments"), {
+            text:p.comment,
+            userId:p.commentBy,
+            userName:p.commentByName,
+            createdAt:serverTimestamp()
+          });
+        }
+      } else if (change.type === "status") {
+        const p = change.payload;
+        await updateDoc(doc(db, "incidents", change.parentId), {
+          status:p.status,
+          comment:p.comment,
+          commentBy:p.comment ? p.userId : null,
+          commentByName:p.comment ? p.userName : null,
+          commentAt:p.comment ? serverTimestamp() : null,
+          completedBy:p.completedBy,
+          completedByName:p.completedByName,
+          completedAt:p.status === "done" ? serverTimestamp() : null,
+          updatedAt:serverTimestamp()
+        });
+      }
+    }
+
+    async function syncOfflineIncidentChanges() {
+      if (syncingOfflineChanges || !navigator.onLine || !auth.currentUser) return;
+      syncingOfflineChanges = true;
+      try {
+        const rows = await getOfflineChanges(OFFLINE_CHANGE_APP);
+        for (const change of rows) {
+          try {
+            await applyIncidentChange(change);
+            await removeOfflineChange(change.changeId);
+          } catch (err) {
+            console.warn("Cambio pendiente sin sincronizar", err);
+            break;
+          }
+        }
+        if (rows.length) await loadAll();
+      } finally {
+        syncingOfflineChanges = false;
+      }
+    }
+
+    async function updateIncidentChangePendingCount(id) {
+      const el = $(`changePending_${id}`);
+      if (!el) return;
+      const pending = await countOfflineChanges(OFFLINE_CHANGE_APP, id);
+      el.textContent = pending ? `${pending} cambio${pending === 1 ? "" : "s"} pendiente${pending === 1 ? "" : "s"} de sincronizar` : "";
     }
 
     async function handleExcelSelection(event) {
@@ -1071,9 +1250,9 @@
       }[c]));
     }
 
-    window.addEventListener("online", () => syncOfflineIncidentPhotos());
+    window.addEventListener("online", () => { syncOfflineIncidentPhotos(); syncOfflineIncidentChanges(); });
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") syncOfflineIncidentPhotos();
+      if (document.visibilityState === "visible") { syncOfflineIncidentPhotos(); syncOfflineIncidentChanges(); }
     });
 
     if ("serviceWorker" in navigator) {

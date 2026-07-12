@@ -1,0 +1,3 @@
+Añade cola offline para fotografías, comentarios y cambios de estado.
+Los cambios se sincronizan al volver la conexión, reabrir la app o regresar a primer plano.
+No desinstalar ni borrar datos de la app mientras haya elementos pendientes.
